@@ -1,0 +1,43 @@
+<!-- templates/inbox.html -->
+{% extends "base.html" %}
+{% block title %}Inbox - Email Manager{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col">
+        <h2><i class="fas fa-inbox"></i> Inbox ({{ emails|length }} emails)</h2>
+    </div>
+    <div class="col text-end">
+        <a href="{{ url_for('compose') }}" class="btn btn-primary">
+            <i class="fas fa-pen"></i> Compose
+        </a>
+        <a href="{{ url_for('inbox') }}" class="btn btn-secondary">
+            <i class="fas fa-sync"></i> Refresh
+        </a>
+    </div>
+</div>
+
+<div class="card shadow">
+    <div class="list-group list-group-flush">
+        {% if emails %}
+            {% for email in emails %}
+            <a href="{{ url_for('view_email', email_id=email.id) }}" 
+               class="list-group-item list-group-item-action email-list-item">
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1"><strong>{{ email.from }}</strong></h6>
+                    <small class="text-muted">{{ email.date[:25] }}</small>
+                </div>
+                <p class="mb-1"><strong>{{ email.subject }}</strong></p>
+                <small class="text-muted">{{ email.body[:100] }}...</small>
+            </a>
+            {% endfor %}
+        {% else %}
+            <div class="list-group-item text-center text-muted py-5">
+                <i class="fas fa-inbox fa-3x mb-3"></i>
+                <p>No emails found</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+

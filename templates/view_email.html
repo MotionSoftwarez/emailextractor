@@ -1,0 +1,39 @@
+<!-- templates/view_email.html -->
+{% extends "base.html" %}
+{% block title %}{{ email.subject }} - Email Manager{% endblock %}
+
+{% block content %}
+<div class="mb-3">
+    <a href="{{ url_for('inbox') }}" class="btn btn-secondary">
+        <i class="fas fa-arrow-left"></i> Back to Inbox
+    </a>
+    <a href="{{ url_for('reply', email_id=email.id) }}" class="btn btn-primary">
+        <i class="fas fa-reply"></i> Reply
+    </a>
+</div>
+
+<div class="card shadow">
+    <div class="card-header bg-primary text-white">
+        <h4 class="mb-0">{{ email.subject }}</h4>
+    </div>
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-2"><strong>From:</strong></div>
+            <div class="col-md-10">{{ email.from }}</div>
+        </div>
+        <div class="row mb-3">
+            <div class="col-md-2"><strong>To:</strong></div>
+            <div class="col-md-10">{{ email.to }}</div>
+        </div>
+        <div class="row mb-3">
+            <div class="col-md-2"><strong>Date:</strong></div>
+            <div class="col-md-10">{{ email.date }}</div>
+        </div>
+        <hr>
+        <div class="email-body">
+            {{ email.body }}
+        </div>
+    </div>
+</div>
+{% endblock %}
+

@@ -1,56 +1,74 @@
+from flask import Flask, render_template, request, redirect, url_for, session, flash, jsonify
 import poplib
+import smtplib
 import email
 from email.header import decode_header
-import csv
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import re
-import getpass
+from datetime import datetime
+from functools import wraps
 
-class EmailToCSV:
-    def __init__(self, email_address, password, pop_server, port=110, use_ssl=False):
+app = Flask(__name__)
+app.secret_key = 'India@team05'  # Change this to a random string
+
+# Email configuration
+EMAIL_CONFIG = {
+    'pop_server': 'webmailmd.aptaracorp.com',
+    'smtp_server': 'webmailmd.aptaracorp.com',
+    'pop_port': 110,
+    'smtp_port': 587,
+    'use_ssl_pop': False,
+    'use_tls_smtp': True
+}
+
+class EmailManager:
+    def __init__(self, email_address, password):
         self.email_address = email_address
         self.password = password
-        self.pop_server = pop_server
-        self.port = port
-        self.use_ssl = use_ssl
-        self.mail = None
+        self.pop_connection = None
+        self.smtp_connection = None
     
-    def connect(self):
-        """Connect to the POP3 server"""
-        connection_methods = [
-            ("POP3 with SSL on port 995", 995, True),
-            ("POP3 without SSL on port 110", 110, False),
-        ]
-        
-        for method_name, port, use_ssl in connection_methods:
-            try:
-                print(f"\nTrying {method_name}...")
-                
-                if use_ssl:
-                    self.mail = poplib.POP3_SSL(self.pop_server, port, timeout=30)
-                else:
-                    self.mail = poplib.POP3(self.pop_server, port, timeout=30)
-                
-                print(f"Connected to server, attempting login...")
-                self.mail.user(self.email_address)
-                self.mail.pass_(self.password)
-                
-                print(f"✓ Successfully connected using {method_name}")
-                return True
-                
-            except poplib.error_proto as e:
-                print(f"✗ Login failed: {str(e)}")
-            except Exception as e:
-                print(f"✗ Connection failed: {str(e)}")
+    def connect_pop(self):
+        """Connect to POP3 server"""
+        try:
+            if EMAIL_CONFIG['use_ssl_pop']:
+                self.pop_connection = poplib.POP3_SSL(
+                    EMAIL_CONFIG['pop_server'], 
+                    EMAIL_CONFIG['pop_port'], 
+                    timeout=30
+                )
+            else:
+                self.pop_connection = poplib.POP3(
+                    EMAIL_CONFIG['pop_server'], 
+                    EMAIL_CONFIG['pop_port'], 
+                    timeout=30
+                )
             
-            self.mail = None
-        
-        print("\n❌ All connection attempts failed.")
-        print("\nPossible solutions:")
-        print("1. Verify your password is correct")
-        print("2. Check if POP3 is enabled in your email settings")
-        print("3. Your server might require an app-specific password")
-        print("4. Contact IT support for the correct POP3 settings")
-        return False
+            self.pop_connection.user(self.email_address)
+            self.pop_connection.pass_(self.password)
+            return True
+        except Exception as e:
+            print(f"POP3 connection error: {str(e)}")
+            return False
+    
+    def connect_smtp(self):
+        """Connect to SMTP server"""
+        try:
+            self.smtp_connection = smtplib.SMTP(
+                EMAIL_CONFIG['smtp_server'], 
+                EMAIL_CONFIG['smtp_port'], 
+                timeout=30
+            )
+            
+            if EMAIL_CONFIG['use_tls_smtp']:
+                self.smtp_connection.starttls()
+            
+            self.smtp_connection.login(self.email_address, self.password)
+            return True
+        except Exception as e:
+            print(f"SMTP connection error: {str(e)}")
+            return False
     
     def decode_mime_words(self, s):
         """Decode MIME encoded strings"""
@@ -68,7 +86,7 @@ class EmailToCSV:
         return ''.join(fragments)
     
     def clean_text(self, text):
-        """Clean text for CSV output"""
+        """Clean text for display"""
         if text is None:
             return ""
         text = re.sub(r'\s+', ' ', text)
@@ -77,6 +95,8 @@ class EmailToCSV:
     def get_email_body(self, msg):
         """Extract email body from message"""
         body = ""
+        html_body = ""
+        
         if msg.is_multipart():
             for part in msg.walk():
                 content_type = part.get_content_type()
@@ -87,152 +107,218 @@ class EmailToCSV:
                         body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
                     except:
                         body = str(part.get_payload())
-                    break
-                elif content_type == "text/html" and not body and "attachment" not in content_disposition:
+                elif content_type == "text/html" and "attachment" not in content_disposition:
                     try:
-                        body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                        html_body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
                     except:
-                        body = str(part.get_payload())
+                        html_body = str(part.get_payload())
         else:
             try:
-                body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+                content = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+                if msg.get_content_type() == "text/html":
+                    html_body = content
+                else:
+                    body = content
             except:
                 body = str(msg.get_payload())
         
-        return self.clean_text(body)
+        return body if body else html_body
     
-    def export_emails(self, output_file='sent_items.csv', limit=None, sent_only=True):
-        """Export emails to CSV (POP3 gets all emails, not just sent)"""
-        if not self.mail:
-            print("Not connected. Please connect first.")
-            return
+    def get_emails(self, limit=50):
+        """Retrieve emails from POP3 server"""
+        if not self.connect_pop():
+            return None
         
         try:
-            # Get number of messages
-            num_messages = len(self.mail.list()[1])
-            print(f"\n✓ Found {num_messages} emails in mailbox")
+            num_messages = len(self.pop_connection.list()[1])
+            start_msg = max(1, num_messages - limit + 1)
             
-            if sent_only:
-                print("⚠ Note: POP3 retrieves all emails in the mailbox.")
-                print("   Filtering to show only sent emails (from your address)...")
+            emails = []
             
-            if limit and limit < num_messages:
-                start_msg = num_messages - limit + 1
-                print(f"Processing last {limit} emails (from message {start_msg} to {num_messages})")
-            else:
-                start_msg = 1
-                limit = num_messages
-                print(f"Processing all {num_messages} emails")
-            
-            # Prepare CSV file
-            with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-                fieldnames = ['Date', 'From', 'To', 'CC', 'Subject', 'Email_Text']
-                writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                
-                processed_count = 0
-                sent_count = 0
-                
-                # Process each email
-                for i in range(start_msg, num_messages + 1):
-                    try:
-                        # Retrieve email
-                        response, lines, octets = self.mail.retr(i)
-                        
-                        # Join all lines to create the email message
-                        msg_content = b'\r\n'.join(lines)
-                        msg = email.message_from_bytes(msg_content)
-                        
-                        # Extract email details
-                        date = msg.get('Date', '')
-                        from_addr = self.decode_mime_words(msg.get('From', ''))
-                        to_addr = self.decode_mime_words(msg.get('To', ''))
-                        cc_addr = self.decode_mime_words(msg.get('CC', ''))
-                        subject = self.decode_mime_words(msg.get('Subject', ''))
-                        body = self.get_email_body(msg)
-                        
-                        # Filter for sent emails if requested
-                        if sent_only:
-                            # Check if email is from your address
-                            if self.email_address.lower() not in from_addr.lower():
-                                processed_count += 1
-                                continue
-                        
-                        # Write to CSV
-                        writer.writerow({
-                            'Date': date,
-                            'From': from_addr,
-                            'To': to_addr,
-                            'CC': cc_addr,
-                            'Subject': subject,
-                            'Email_Text': body
-                        })
-                        
-                        sent_count += 1
-                        processed_count += 1
-                        print(f"Processed {processed_count}/{limit}: {subject[:50]}... [SENT]" if sent_only else f"Processed {processed_count}/{limit}: {subject[:50]}...")
+            for i in range(num_messages, start_msg - 1, -1):
+                try:
+                    response, lines, octets = self.pop_connection.retr(i)
+                    msg_content = b'\r\n'.join(lines)
+                    msg = email.message_from_bytes(msg_content)
                     
-                    except Exception as e:
-                        print(f"Error processing email {i}: {str(e)}")
-                        continue
+                    email_data = {
+                        'id': i,
+                        'date': msg.get('Date', ''),
+                        'from': self.decode_mime_words(msg.get('From', '')),
+                        'to': self.decode_mime_words(msg.get('To', '')),
+                        'subject': self.decode_mime_words(msg.get('Subject', '(No Subject)')),
+                        'body': self.get_email_body(msg),
+                        'message_id': msg.get('Message-ID', '')
+                    }
+                    
+                    emails.append(email_data)
+                except Exception as e:
+                    print(f"Error retrieving email {i}: {str(e)}")
+                    continue
             
-            if sent_only:
-                print(f"\n✓ Successfully exported {sent_count} sent emails to {output_file}")
-            else:
-                print(f"\n✓ Successfully exported {processed_count} emails to {output_file}")
+            self.pop_connection.quit()
+            return emails
             
         except Exception as e:
-            print(f"Error exporting emails: {str(e)}")
+            print(f"Error getting emails: {str(e)}")
+            return None
     
-    def disconnect(self):
-        """Disconnect from the server"""
-        if self.mail:
-            try:
-                self.mail.quit()
-                print("Disconnected from server")
-            except:
-                pass
+    def send_email(self, to_address, subject, body, in_reply_to=None):
+        """Send an email via SMTP"""
+        if not self.connect_smtp():
+            return False, "Failed to connect to SMTP server"
+        
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = self.email_address
+            msg['To'] = to_address
+            msg['Subject'] = subject
+            
+            if in_reply_to:
+                msg['In-Reply-To'] = in_reply_to
+                msg['References'] = in_reply_to
+            
+            msg.attach(MIMEText(body, 'plain'))
+            
+            self.smtp_connection.send_message(msg)
+            self.smtp_connection.quit()
+            
+            return True, "Email sent successfully"
+            
+        except Exception as e:
+            return False, f"Error sending email: {str(e)}"
 
+# Login required decorator
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'email' not in session:
+            flash('Please login first', 'warning')
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
-# Main execution
-if __name__ == "__main__":
-    print("=== Email to CSV Exporter (POP3) ===\n")
-    
-    # Configuration
-    EMAIL = "pawan.sharma1@aptaracorp.com"
-    POP_SERVER = "webmailmd.aptaracorp.com"
-    
-    # Prompt for password securely
-    print(f"Email: {EMAIL}")
-    print(f"POP3 Server: {POP_SERVER}")
-    PASSWORD = getpass.getpass("Enter your password: ")
-    
-    # Create exporter instance
-    exporter = EmailToCSV(EMAIL, PASSWORD, POP_SERVER)
-    
-    if exporter.connect():
-        print("\n=== Connection Successful! ===")
+@app.route('/')
+def index():
+    if 'email' in session:
+        return redirect(url_for('inbox'))
+    return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email_address = request.form.get('email')
+        password = request.form.get('password')
         
-        # Ask user preferences
-        print("\n⚠ Important: POP3 downloads ALL emails in your mailbox (Inbox).")
-        print("   It cannot access the 'Sent Items' folder directly.")
-        print("   We will filter to show only emails sent FROM your address.\n")
-        
-        filter_choice = input("Export only sent emails? (Y/n): ").strip().lower()
-        sent_only = filter_choice != 'n'
-        
-        limit_input = input("How many recent emails to process? (press Enter for all): ").strip()
-        limit = int(limit_input) if limit_input else None
-        
-        # Export emails
-        exporter.export_emails(output_file='sent_items.csv', limit=limit, sent_only=sent_only)
-        exporter.disconnect()
-    else:
-        print("\n❌ Could not connect to the server.")
-        print("\nPlease verify:")
-        print("1. Your password is correct")
-        print("2. POP3 is enabled on your email account")
-        print("3. The POP3 server address is: webmailmd.aptaracorp.com")
-        print("4. You might need an app-specific password")
+        # Test connection
+        manager = EmailManager(email_address, password)
+        if manager.connect_pop():
+            manager.pop_connection.quit()
+            session['email'] = email_address
+            session['password'] = password
+            flash('Login successful!', 'success')
+            return redirect(url_for('inbox'))
+        else:
+            flash('Login failed. Please check your credentials.', 'danger')
     
-    print("\nDone!")
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash('Logged out successfully', 'info')
+    return redirect(url_for('login'))
+
+@app.route('/inbox')
+@login_required
+def inbox():
+    manager = EmailManager(session['email'], session['password'])
+    emails = manager.get_emails(limit=50)
+    
+    if emails is None:
+        flash('Error retrieving emails', 'danger')
+        return redirect(url_for('logout'))
+    
+    return render_template('inbox.html', emails=emails)
+
+@app.route('/email/<int:email_id>')
+@login_required
+def view_email(email_id):
+    manager = EmailManager(session['email'], session['password'])
+    emails = manager.get_emails(limit=100)
+    
+    if emails is None:
+        flash('Error retrieving email', 'danger')
+        return redirect(url_for('inbox'))
+    
+    # Find the specific email
+    email_data = next((e for e in emails if e['id'] == email_id), None)
+    
+    if email_data is None:
+        flash('Email not found', 'warning')
+        return redirect(url_for('inbox'))
+    
+    return render_template('view_email.html', email=email_data)
+
+@app.route('/compose', methods=['GET', 'POST'])
+@login_required
+def compose():
+    if request.method == 'POST':
+        to_address = request.form.get('to')
+        subject = request.form.get('subject')
+        body = request.form.get('body')
+        
+        manager = EmailManager(session['email'], session['password'])
+        success, message = manager.send_email(to_address, subject, body)
+        
+        if success:
+            flash(message, 'success')
+            return redirect(url_for('inbox'))
+        else:
+            flash(message, 'danger')
+    
+    return render_template('compose.html')
+
+@app.route('/reply/<int:email_id>', methods=['GET', 'POST'])
+@login_required
+def reply(email_id):
+    manager = EmailManager(session['email'], session['password'])
+    emails = manager.get_emails(limit=100)
+    
+    if emails is None:
+        flash('Error retrieving email', 'danger')
+        return redirect(url_for('inbox'))
+    
+    # Find the specific email
+    original_email = next((e for e in emails if e['id'] == email_id), None)
+    
+    if original_email is None:
+        flash('Email not found', 'warning')
+        return redirect(url_for('inbox'))
+    
+    if request.method == 'POST':
+        body = request.form.get('body')
+        subject = f"Re: {original_email['subject']}" if not original_email['subject'].startswith('Re:') else original_email['subject']
+        
+        # Extract email address from "Name <email@domain.com>" format
+        from_addr = original_email['from']
+        email_match = re.search(r'<(.+?)>', from_addr)
+        to_address = email_match.group(1) if email_match else from_addr
+        
+        success, message = manager.send_email(
+            to_address, 
+            subject, 
+            body, 
+            in_reply_to=original_email['message_id']
+        )
+        
+        if success:
+            flash(message, 'success')
+            return redirect(url_for('inbox'))
+        else:
+            flash(message, 'danger')
+    
+    return render_template('reply.html', email=original_email)
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)

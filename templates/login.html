@@ -1,0 +1,34 @@
+
+<!-- templates/login.html -->
+{% extends "base.html" %}
+{% block title %}Login - Email Manager{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 col-lg-4">
+        <div class="card shadow">
+            <div class="card-body p-4">
+                <h3 class="card-title text-center mb-4">
+                    <i class="fas fa-envelope-open-text fa-2x text-primary"></i>
+                    <br>Login to Email
+                </h3>
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Email Address</label>
+                        <input type="email" class="form-control" id="email" name="email" 
+                               value="pawan.sharma1@aptaracorp.com" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="fas fa-sign-in-alt"></i> Login
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

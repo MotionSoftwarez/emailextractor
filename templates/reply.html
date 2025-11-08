@@ -1,0 +1,53 @@
+<!-- templates/reply.html -->
+{% extends "base.html" %}
+{% block title %}Reply - Email Manager{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-10 offset-md-1">
+        <div class="card shadow mb-3">
+            <div class="card-header bg-secondary text-white">
+                <h5 class="mb-0">Original Email</h5>
+            </div>
+            <div class="card-body">
+                <p><strong>From:</strong> {{ email.from }}</p>
+                <p><strong>Subject:</strong> {{ email.subject }}</p>
+                <div class="email-body" style="max-height: 200px; overflow-y: auto;">
+                    {{ email.body }}
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0"><i class="fas fa-reply"></i> Reply to Email</h4>
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label">To:</label>
+                        <input type="text" class="form-control" value="{{ email.from }}" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Subject:</label>
+                        <input type="text" class="form-control" 
+                               value="Re: {{ email.subject }}" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label for="body" class="form-label">Your Reply:</label>
+                        <textarea class="form-control" id="body" name="body" rows="15" required></textarea>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-paper-plane"></i> Send Reply
+                        </button>
+                        <a href="{{ url_for('view_email', email_id=email.id) }}" class="btn btn-secondary">
+                            <i class="fas fa-times"></i> Cancel
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
